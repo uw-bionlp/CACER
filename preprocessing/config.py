@@ -1,0 +1,17 @@
+ASSERTION="Assertion"
+PROBLEM="Problem"
+DRUG='Drug'
+DRUG_CANDIDATES=['Possible_Drug'] # to rename those candidates as drug
+
+ANATOMY="Anatomy"
+FREQUENCY="Frequency"
+DURATION="Duration"
+CHARACTERISTICS="Characteristics"
+CHANGE="Change"
+SEVERITY="Severity"
+
+
+SPAN_WITH_ASSERTION=[ASSERTION,CHANGE, SEVERITY]
+VALID_TYPES=[PROBLEM,DRUG,
+            ASSERTION,CHANGE,SEVERITY,
+            ANATOMY,FREQUENCY,DURATION,CHARACTERISTICS]
