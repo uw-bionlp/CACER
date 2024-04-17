@@ -1,0 +1,138 @@
+{
+    "entities": {
+        "Anatomy": {
+            "short": "Anatomy",
+            "verbose": "Anatomy"
+        },
+        "Change-improving": {
+            "short": "Change-improving",
+            "verbose": "Change-improving"
+        },
+        "Change-no_change": {
+            "short": "Change-no_change",
+            "verbose": "Change-no_change"
+        },
+        "Change-resolved": {
+            "short": "Change-resolved",
+            "verbose": "Change-resolved"
+        },
+        "Change-worsening": {
+            "short": "Change-worsening",
+            "verbose": "Change-worsening"
+        },
+        "Characteristics": {
+            "short": "Characteristics",
+            "verbose": "Characteristics"
+        },
+        "Drug": {
+            "short": "Drug",
+            "verbose": "Drug"
+        },
+        "Duration": {
+            "short": "Duration",
+            "verbose": "Duration"
+        },
+        "Frequency": {
+            "short": "Frequency",
+            "verbose": "Frequency"
+        },
+        "Problem-absent": {
+            "short": "Problem-absent",
+            "verbose": "Problem-absent"
+        },
+        "Problem-conditional": {
+            "short": "Problem-conditional",
+            "verbose": "Problem-conditional"
+        },
+        "Problem-hypothetical": {
+            "short": "Problem-hypothetical",
+            "verbose": "Problem-hypothetical"
+        },
+        "Problem-not_patient": {
+            "short": "Problem-not_patient",
+            "verbose": "Problem-not_patient"
+        },
+        "Problem-possible": {
+            "short": "Problem-possible",
+            "verbose": "Problem-possible"
+        },
+        "Problem-present": {
+            "short": "Problem-present",
+            "verbose": "Problem-present"
+        },
+        "Severity-mild": {
+            "short": "Severity-mild",
+            "verbose": "Severity-mild"
+        },
+        "Severity-moderate": {
+            "short": "Severity-moderate",
+            "verbose": "Severity-moderate"
+        },
+        "Severity-severe": {
+            "short": "Severity-severe",
+            "verbose": "Severity-severe"
+        }
+    },
+    "relations": {
+        "PIP": {
+            "short": "PIP",
+            "verbose": "PIP",
+            "symmetric": false
+        },
+        "Problem-Anatomy": {
+            "short": "Problem-Anatomy",
+            "verbose": "Problem-Anatomy",
+            "symmetric": false
+        },
+        "Problem-Change": {
+            "short": "Problem-Change",
+            "verbose": "Problem-Change",
+            "symmetric": false
+        },
+        "Problem-Characteristics": {
+            "short": "Problem-Characteristics",
+            "verbose": "Problem-Characteristics",
+            "symmetric": false
+        },
+        "Problem-Duration": {
+            "short": "Problem-Duration",
+            "verbose": "Problem-Duration",
+            "symmetric": false
+        },
+        "Problem-Frequency": {
+            "short": "Problem-Frequency",
+            "verbose": "Problem-Frequency",
+            "symmetric": false
+        },
+        "Problem-Severity": {
+            "short": "Problem-Severity",
+            "verbose": "Problem-Severity",
+            "symmetric": false
+        },
+        "TrAP": {
+            "short": "TrAP",
+            "verbose": "TrAP",
+            "symmetric": false
+        },
+        "TrCP": {
+            "short": "TrCP",
+            "verbose": "TrCP",
+            "symmetric": false
+        },
+        "TrIP": {
+            "short": "TrIP",
+            "verbose": "TrIP",
+            "symmetric": false
+        },
+        "TrNAP": {
+            "short": "TrNAP",
+            "verbose": "TrNAP",
+            "symmetric": false
+        },
+        "TrWP": {
+            "short": "TrWP",
+            "verbose": "TrWP",
+            "symmetric": false
+        }
+    }
+}

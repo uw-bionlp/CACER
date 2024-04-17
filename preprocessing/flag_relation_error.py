@@ -21,18 +21,11 @@ def print_relation(anns,file):
 
 if __name__ == "__main__":
 
-    # source_dir=f"" # the source directory containing all ann files.
-    # outdir="" # the output directory to store all the BRAT files with errors.
-    # files=glob(f"{source_dir}/*.ann")
-    # SUMMARY_FILE="" # the output csv file for a summary of errors.
+    source_dir=f"" # the source directory containing all ann files.
+    outdir="" # the output directory to store all the BRAT files with errors.
+    SUMMARY_FILE="" # the output csv file for a summary of errors.
 
     # pring the files with double relation
-    split='test'
-    source_dir=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_cleaned" # the source directory containing all ann files.
-    outdir=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_relation" # the output directory to store all the BRAT files with errors.
-    
-    SUMMARY_FILE=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_relation.csv" # the output csv file for a summary of errors.
-
     files=glob(f"{source_dir}/*.ann")
 
     os.makedirs(outdir,exist_ok=True)

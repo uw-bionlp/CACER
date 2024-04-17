@@ -63,12 +63,6 @@ if __name__ == "__main__":
     outdir="" # the output directory to store all the BRAT files with errors.
     SUMMARY_FILE=""
     
-    split='train'
-    source_dir=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_cleaned" # the source directory containing all ann files.
-    outdir=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_entity" # the output directory to store all the BRAT files with errors.
-    
-    SUMMARY_FILE=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_entity.csv" # the output csv file for a summary of errors.
-
     files=glob(f"{source_dir}/*.ann")
     # the output csv file for a summary of errors.
 

@@ -153,16 +153,9 @@ def merging_events(anns,removed):
 
 if __name__ == "__main__":
 
-    # source_dir=f"" # the source directory containing all ann files.
-    # outdir="" # the output directory to store all the BRAT files with errors.
-    # files=glob(f"{source_dir}/*.ann")
-    # SUMMARY_FILE="" # the output csv file for a summary of errors.
-
-    split='train'
-    source_dir=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}" # the source directory containing all ann files.
-    outdir=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_cleaned" # the output directory to store all the BRAT files with errors.
-    print(outdir)
-    SUMMARY_FILE=f"/home/velvinfu/data/ProstateDLBCLPostDiagnosis/R15_dataset_paper/final3/{split}_auto.csv" # the output csv file for a summary of errors.
+    source_dir=f"" # the source directory containing all ann files.
+    outdir="" # the output directory to store all the BRAT files with errors.
+    SUMMARY_FILE="" # the output csv file for a summary of errors.
 
     files=glob(f"{source_dir}/*.ann")
     changes=[]
