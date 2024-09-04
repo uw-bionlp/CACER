@@ -24,7 +24,7 @@ Using the script preprocessing/demographics.ipynb
 2. Calculating the demographics
 
 ## Dataset availability 
-The dataset will be released after approval from the University of Washington (UW) Institutional Review Boards (IRBs).
+The dataset will be released after obtaining approval from the University of Washington (UW) Institutional Review Boards (IRBs).
 
 ## Format conversion
 1. Download the raw BRAT .ann file and store it under the folder dataset/BRAT
@@ -45,7 +45,8 @@ The code deploys the huggingface [peft](https://github.com/huggingface/peft) pac
 ## llama
 The code deploys the [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) package, please first clone the corresponding directory and find the details from the script in experiments/llama/run.sh.
 
-# Evaluation
+## Evaluation
+The script for scoring and significance testing can be found under the folder, _evaluation_.
 
 # Contact
 For questions about this dataset, please contact Velvin Fu at velvinfu@uw.edu.
