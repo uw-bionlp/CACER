@@ -21,12 +21,18 @@ CHARACTERISTICS="Characteristics"
 CHANGE="Change"
 SEVERITY="Severity"
 
+all_attributes=[ASSERTION,ANATOMY,DURATION,FREQUENCY,CHARACTERISTICS,CHANGE,SEVERITY]
+Sub_types={
+    ASSERTION: ['present','absent','hypothetical','not_patient','possible','conditional'],
+    CHANGE: ['improving','worsening','no_change','resolved'],
+    SEVERITY: ['mild','moderate','severe'],
+}
 
 SPAN_WITH_ASSERTION=[ASSERTION,CHANGE, SEVERITY]
 VALID_TYPES=[PROBLEM,DRUG,
             ASSERTION,CHANGE,SEVERITY,
             ANATOMY,FREQUENCY,DURATION,CHARACTERISTICS]
-
+TRIGGERS=[DRUG,PROBLEM]
 relation_type_map={
     "admin_for":"TrAP",
     "not_admin_because":"TrNAP",
@@ -97,6 +103,10 @@ relation_names={
     'TrWP':'Worsens',
     'PIP':'PIP'
 }
+
+relation_names_reversed={}
+for k, v in relation_names.items():
+    relation_names_reversed[v]=k
 
 Entity_types=['Assertion','Change','Severity']
 Entity_subtypes=[]

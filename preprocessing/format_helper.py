@@ -4,10 +4,11 @@ import random
 import json
 import numpy as np
 import json
-from glob import glob
 from tqdm import tqdm
 import copy
 import spacy
+import os
+import shutil
 nlp = spacy.load("en_core_web_sm")
 
 from config import *
@@ -140,7 +141,7 @@ def find_token_information(text,tokenizer):
     # for sent in doc.sents:
     #     print(sent)
     total_sent=0
-    tokens=[{'text':tok.text,'start':tok.idx,'end':tok.idx+len(tok.text)} for tok in doc]
+    tokens=[{'text':tok.text,'start':tok.idx,'end':tok.idx+len(tok.text)} for tok in doc if len(tok.text)>0]
     for idx, tok in enumerate(tokens):
         tokens[idx]['sent_id']=sum([s<=tok['start'] for s in sents])-1
         total_sent=max(total_sent,tokens[idx]['sent_id'])
@@ -177,6 +178,8 @@ def brat2spert_note(source_dir,outfile,tokenizer):
                 if type not in Entity_types:
                     #print(l,[s,e])
                     continue
+                if e<=s:
+                    print(l,[s,e])
                 if [s,e,type] in mapped_entities:
                     entity_type_map[tb]=mapped_entities.index([s,e,type])
                     continue
@@ -264,6 +267,8 @@ def brat2spert_note(source_dir,outfile,tokenizer):
                             sent_end=None
                         else:
                             sent_end=sent_end[0]['start']
+                        if entities[tidx]['type']=='Drug':
+                            hidx,tidx=tidx,hidx
                         relations.append({
                             'type':relation_type_map[words[1]],
                             'head':hidx,
@@ -289,7 +294,226 @@ def brat2spert_note(source_dir,outfile,tokenizer):
         json.dump(output,f,indent=4)
     return
 
-def spert2plmarker(source_file,output_filename,tokenizer):
+def spertNote2spertWindow_AllRE(source_file,outfile,max_tokens=400,include_events=False):
+    # this code include all relations within this window
+    # if setting include_events to the False, will exclude all trigger-attributes connections, and remove all attributes labels
+    
+    source=json.load(open(source_file))
+    final_output=[]
+
+    for data in tqdm(source):
+        tokens=data['tokens']
+        sent_starts=[0] + [i for i,t in enumerate(tokens) if i>0 and t['sent_id']!=tokens[i-1]['sent_id']]
+        sent_ends=[i+1 for i,t in enumerate(tokens) if i<len(tokens)-1 and t['sent_id']!=tokens[i+1]['sent_id']]+[len(tokens)]
+        
+        current_end=-1
+        for start_sent_id,start_token in enumerate(sent_starts):
+            end_sent_id=max(current_end+0,start_sent_id)
+            end_token=sent_ends[end_sent_id] if end_sent_id<len(sent_ends) else len(tokens)-1
+
+            while end_sent_id<=len(sent_ends) and \
+                sum([data["sent_length"][ls] for ls in range(start_sent_id,end_sent_id)])<=max_tokens:
+                end_sent_id+=1
+                end_token=sent_ends[end_sent_id] if end_sent_id<len(sent_ends) else len(tokens)-1
+            
+            end_sent_id-=1
+            end_token=sent_ends[end_sent_id] if end_sent_id<len(sent_ends) else len(tokens)-1
+            end_token=min(end_token,len(tokens)-1)
+
+            # if the current end sentence has not been covered.
+            if current_end!=end_sent_id and end_sent_id>=start_sent_id:
+                entity_idx=[idx for idx,ent in enumerate(data["entities"]) \
+                        if ent['start']>=start_token and ent['start']<end_token \
+                            and ent['end']>start_token and ent['end']<=end_token and \
+                                (include_events or ent['type'] in TRIGGERS or PROBLEM in ent['type'])]
+                
+                
+                entities=[]
+                for i,idx in enumerate(entity_idx):
+                    entities.append(copy.deepcopy(data['entities'][idx]))
+                    entities[-1]['start']-=start_token
+                    entities[-1]['end']-=start_token
+                    entities[-1]["ent_idx"]=i
+                
+                relations=[]
+                for rel in data['relations']:
+                    if rel['head'] in entity_idx and rel['tail'] in entity_idx:
+                        relations.append(copy.deepcopy(rel))
+                        relations[-1]['head']=entity_idx.index(rel['head'])
+                        relations[-1]['tail']=entity_idx.index(rel['tail'])
+                        head=entities[relations[-1]['head']]
+                        head_s,head_e=tokens[head['start']+start_token]['start'],tokens[head['end']-1+start_token]['end']
+                        tail=entities[relations[-1]['tail']]
+                        tail_s,tail_e=tokens[tail['start']+start_token]['start'],tokens[tail['end']-1+start_token]['end']
+                        relations[-1]['rel-id']=(rel['type'],head_s,head_e,tail_s,tail_e)
+                
+                
+                final_output.append({
+                    'id':'{}-{}-{}'.format(data['id'],tokens[start_token]["start"],tokens[end_token]["start"]),
+                    'start_send_id':start_sent_id,
+                    'num_sent':end_sent_id-start_sent_id,
+                    'offset':tokens[start_token]["start"],
+                    'token_end':tokens[end_token]["start"],
+                    'sent':' '.join([t['text'] for t in tokens[start_token:end_token]]),
+                    'num_BERTtokens':sum([data["sent_length"][ls] for ls in range(start_sent_id,end_sent_id)]),
+                    'tokens':[t['text'] for t in tokens[start_token:end_token]],
+                    'token_offsets':copy.deepcopy(tokens[start_token:end_token]),
+                    'entities':copy.deepcopy(entities),
+                    'relations':copy.deepcopy(relations),
+                })
+    with open(outfile,'w') as f:
+        json.dump(final_output,f,indent=4)
+    return
+
+def spertNote2spertWindow(split,source_file,outfile,max_tokens=400,
+                          include_events=False,include_entities_side=False,max_sent=4,tokenizer=None):
+    # this function only include the relations at the beginning and ending sentence of this window.
+    # if setting include_events to the False, will exclude all trigger-attributes connections, and remove all attributes labels
+    
+    source=json.load(open(source_file))
+    final_output=[]
+
+    for data in tqdm(source):
+        tokens=data['tokens']
+        sent_starts=[0] + [i for i,t in enumerate(tokens) if i>0 and t['sent_id']!=tokens[i-1]['sent_id']]
+        sent_ends=[i+1 for i,t in enumerate(tokens) if i<len(tokens)-1 and t['sent_id']!=tokens[i+1]['sent_id']]+[len(tokens)]
+        
+
+        for start_sent_id,start_token in enumerate(sent_starts):
+            end_sent_id=start_sent_id
+            end_token=sent_ends[end_sent_id] if end_sent_id<len(sent_ends) else len(tokens)
+
+            while end_sent_id<=min(len(sent_ends),start_sent_id+max_sent) and \
+                sum([data["sent_length"][ls] for ls in range(start_sent_id,end_sent_id)])<=max_tokens:
+                current_sent=' '.join([t['text'] for t in data["tokens"][start_token:end_token]])
+                
+                if split=='train' and include_entities_side:
+                    # all entities within the window
+                    entity_idx=[idx for idx,ent in enumerate(data["entities"]) \
+                        if ent['start']>=start_token and ent['start']<end_token \
+                            and ent['end']>start_token and ent['end']<=end_token and \
+                                (include_events or ent['type'] in TRIGGERS or PROBLEM in ent['type'])]
+                else:
+                    entity_idx=[idx for idx,ent in enumerate(data["entities"]) \
+                        if ent["sent_idx"] in [end_sent_id,start_sent_id] and \
+                        ent['start']>=start_token and ent['start']<end_token \
+                            and ent['end']>start_token and ent['end']<=end_token and \
+                                (include_events or ent['type'] in TRIGGERS or PROBLEM in ent['type'])]
+
+                
+                entities=[]
+                find_problem=False
+                for i,idx in enumerate(entity_idx):
+                    entities.append(copy.deepcopy(data['entities'][idx]))
+                    entities[-1]['start']-=start_token
+                    entities[-1]['end']-=start_token
+                    entities[-1]["ent_idx"]=i
+                    if PROBLEM in entities[-1]['type']:#==PROBLEM:
+                        find_problem=True
+                
+                #must have relations
+                if len(entities)>1 and find_problem:              
+                    relations=[]
+                    for rel in data['relations']:
+                        if rel['head'] in entity_idx and rel['tail'] in entity_idx:
+                            if split=='train' or start_sent_id==end_sent_id or \
+                                data['entities'][rel['head']]['sent_idx']!=data['entities'][rel['tail']]['sent_idx']:
+                                relations.append(copy.deepcopy(rel))
+                                relations[-1]['head']=entity_idx.index(rel['head'])
+                                relations[-1]['tail']=entity_idx.index(rel['tail'])
+                                head=entities[relations[-1]['head']]
+                                head_s,head_e=tokens[head['start']+start_token]['start'],tokens[head['end']-1+start_token]['end']
+                                tail=entities[relations[-1]['tail']]
+                                tail_s,tail_e=tokens[tail['start']+start_token]['start'],tokens[tail['end']-1+start_token]['end']
+                                
+                                relations[-1]['rel-id']=(rel['type'],head_s,head_e,tail_s,tail_e)
+                                       
+                    final_output.append({
+                        'id':'{}-{}-{}'.format(data['id'],tokens[start_token]["start"],tokens[end_token-1]["start"]),
+                        'start_send_id':start_sent_id,
+                        'num_sent':end_sent_id-start_sent_id,
+                        'offset':tokens[start_token]["start"],
+                        'token_end':tokens[end_token-1]["start"],
+                        'sent':' '.join([t['text'] for t in tokens[start_token:end_token]]),
+                        'num_BERTtokens':sum([data["sent_length"][ls] for ls in range(start_sent_id,end_sent_id)]),
+                        'tokens':[t['text'] for t in tokens[start_token:end_token]],
+                        'token_offsets':copy.deepcopy(tokens[start_token:end_token]),
+                        'entities':copy.deepcopy(entities),
+                        'relations':copy.deepcopy(relations),
+                    })
+
+                end_sent_id+=1
+                end_token=sent_ends[end_sent_id] if end_sent_id<len(sent_ends) else len(tokens)-1
+
+        #break
+    with open(outfile,'w') as f:
+        json.dump(final_output,f,indent=4)
+    return
+
+def spertNote2spertSent(source_file,outfile,max_tokens=400):
+
+    source=json.load(open(source_file))
+    final_output=[]
+
+    for data in tqdm(source):
+        tokens=data['tokens']
+        sent_starts=[0] + [i for i,t in enumerate(tokens) if i>0 and t['sent_id']!=tokens[i-1]['sent_id']]
+        sent_ends=[i+1 for i,t in enumerate(tokens) if i<len(tokens)-1 and t['sent_id']!=tokens[i+1]['sent_id']]+[len(tokens)]
+        
+
+        for sent_id,start_token in enumerate(sent_starts):
+            end_sent_id=sent_id
+            end_token=sent_ends[sent_id] if end_sent_id<len(sent_ends) else len(tokens)
+
+            if end_token-start_token<=max_tokens:
+
+                entity_idx=[idx for idx,ent in enumerate(data["entities"]) \
+                        if ent["sent_idx"] ==sent_id and \
+                            ent['start']>=start_token and ent['start']<end_token \
+                            and ent['end']>start_token and ent['end']<=end_token]
+                
+                
+                entities=[]
+                for i,idx in enumerate(entity_idx):
+                    entities.append(copy.deepcopy(data['entities'][idx]))
+                    entities[-1]['start']-=start_token
+                    entities[-1]['end']-=start_token
+                    entities[-1]["ent_idx"]=i
+                    if entities[-1]['start']>=entities[-1]['end']:
+                        print(entities[-1])
+          
+                relations=[]
+                for rel in data['relations']:
+                    if rel['head'] in entity_idx and rel['tail'] in entity_idx:
+                        relations.append(copy.deepcopy(rel))
+                        relations[-1]['head']=entity_idx.index(rel['head'])
+                        relations[-1]['tail']=entity_idx.index(rel['tail'])
+                        head=entities[relations[-1]['head']]
+                        head_s,head_e=tokens[head['start']+start_token]['start'],tokens[head['end']-1+start_token]['end']
+                        tail=entities[relations[-1]['tail']]
+                        tail_s,tail_e=tokens[tail['start']+start_token]['start'],tokens[tail['end']-1+start_token]['end']
+                        
+                        relations[-1]['rel-id']=(rel['type'],head_s,head_e,tail_s,tail_e)
+                                    
+                final_output.append({
+                    'id':'{}-{}-{}'.format(data['id'],tokens[start_token]["start"],tokens[end_token-1]["start"]),
+                    'start_send_id':sent_id,
+                    'num_sent':0,
+                    'offset':tokens[start_token]["start"],
+                    'token_end':tokens[end_token-1]["start"],
+                    'sent':' '.join([t['text'] for t in tokens[start_token:end_token]]),
+                    'num_BERTtokens':data["sent_length"][sent_id],
+                    'tokens':[t['text'] for t in tokens[start_token:end_token]],
+                    'token_offsets':copy.deepcopy(tokens[start_token:end_token]),
+                    'entities':copy.deepcopy(entities),
+                    'relations':copy.deepcopy(relations),
+                })
+        #break
+    with open(outfile,'w') as f:
+        json.dump(final_output,f,indent=4)
+    return
+
+def spert2plmarker(source_file,output_filename,tokenizer,include_all_relations=True):
     source=json.load(open(source_file))
     final_output=[]
 
@@ -306,11 +530,11 @@ def spert2plmarker(source_file,output_filename,tokenizer):
             current_id=data[id_key]
             offset,sentences,ners,relations=reset_input()
         
-        if get_token_length(' '.join(data["tokens"]),tokenizer)>1000:
+        if tokenizer is not None and get_token_length(' '.join(data["tokens"]),tokenizer)>=400:
             print('long sentence')
             continue        
         #check the spert tail index
-        assert all([entity["end"]<=len(data["tokens"]) for entity in data["entities"] if entity["type"] in entity_type_map2]), data
+        assert all([entity["end"]<=len(data["tokens"]) for entity in data["entities"] if entity["type"] in entity_type_map2]), [(entity["end"],len(data["tokens"])) for entity in data["entities"] if entity["type"] in entity_type_map2]
         assert all([data["entities"][rl["head"]]["end"]<=len(data["tokens"]) for rl in data["relations"] if rl["type"] in relation_type_map2])
         assert all([data["entities"][rl["tail"]]["end"]<=len(data["tokens"]) for rl in data["relations"] if rl["type"] in relation_type_map2]) 
         
@@ -334,11 +558,10 @@ def spert2plmarker(source_file,output_filename,tokenizer):
                  #print(entity)
         temp_rl=[]
         for rl in data["relations"]:
-            if rl["type"] in relation_type_map2: #relation_type_map2: # include relations only
-                rl["type"]=relation_type_map2[rl["type"]]
+            if include_all_relations or rl["type"] in relation_type_map2: #relation_type_map2: # include relations only
+                rl["type"]=relation_type_map2[rl["type"]]#,rl["type"])
                 head,tail=rl["head"],rl["tail"]
 
-                #because you need to switch on UW, the drug and treatment always come first
                 if data["entities"][tail]["type"] in ["Drug","treatment"]:
                      head,tail=tail,head
                 if data["entities"][head]["type"] in entity_type_map2 \
@@ -347,7 +570,7 @@ def spert2plmarker(source_file,output_filename,tokenizer):
                     s2,e2=data["entities"][tail]["start"]+offset,data["entities"][tail]["end"]+offset-1
                     if [s1,e1,entity_type_map2[data["entities"][head]["type"]]] in ners[-1] and \
                         [s2,e2,entity_type_map2[data["entities"][tail]["type"]]] in ners[-1]:
-                        if rl["type"] in relation_type_map:
+                        if include_all_relations or rl["type"] in relation_type_map:
                             temp_rl.append([s1,e1,s2,e2,rl["type"]])
                     else:
                         print("errors, the relations are not in the relation map")
@@ -423,6 +646,68 @@ def plmarker2T5QA(source,out_dir):
     with open(out_dir,"w") as f:
         json.dump(output,f,indent=4)
 
+def spert2T5QA(source,out_dir,neg_prob=1):
+    source=json.loads(open(source).read())
+
+    output=[]
+    ids=[]
+    for dic in tqdm(source):
+        offset=0
+        sent,ner,rels=dic["tokens"],dic["entities"],dic["relations"]
+        id=dic['id']
+        if len(ner)>=2:
+            for e1 in range(1,len(ner)):
+                for e2 in range(e1):
+                    PIP_index=0
+                    if dic['num_sent']!=0 and ner[e1]['sent_idx']==ner[e2]['sent_idx']:
+                        continue
+                    # if ner[e1]['start']>ner[e2]['start']:
+                    #     e1,e2=e2,e1
+                        
+                    ent1,ent2=ner[e1],ner[e2]
+                    ent1=[ent1['start'],min(ent1['end'],len(sent))-1,ent1['type']]
+                    ent2=[ent2['start'],min(ent2['end'],len(sent))-1,ent2['type']]
+                    rel=[r for r in rels if (r['head']==e1 and r['tail']==e2) or (r['head']==e2 and r['tail']==e1)]
+                    
+                    if rel:
+                        PIP_index=1 if rel[0]['head']==e2 else 0
+                        rel=rel[0]['type']
+                    else:
+                        rel=None
+                    span1,type1=get_span(ent1,sent,offset)
+                    span2,type2=get_span(ent2,sent,offset)
+                    type1=type1.split('-')[0]
+                    type2=type2.split('-')[0]
+                    span1,type1,span2,type2,options,answer,ent1,ent2=generate_options(span1,type1,span2,type2,rel,ent1,ent2,PIP_index)
+                    
+                    if options is not None:
+                        if dic['num_sent']!=0 and rel is None and random.uniform(0, 1) > neg_prob:
+                            continue
+                        output_sent=copy.deepcopy(sent)
+                        output_sent[ent1[0]-offset]='<'+output_sent[ent1[0]-offset]
+                        output_sent[ent1[1]-offset]=output_sent[ent1[1]-offset]+f'>({type1})'
+                        output_sent[ent2[0]-offset]='<'+output_sent[ent2[0]-offset]
+                        output_sent[ent2[1]-offset]=output_sent[ent2[1]-offset]+f'>({type2})'
+                        output_sent=' '.join(output_sent)
+
+                        tid=f"{id}-<{span1}>({type1}){ent1[0]}-<{span2}>({type2}){ent2[0]}"
+                        assert type2==PROBLEM and type1 in [PROBLEM,DRUG],[type1,type2]
+                        if tid in ids:
+                            continue
+                        output.append({
+                            "id":tid,
+                            'num_sent':dic['num_sent'],
+                            "instruction":f"What is the relationship between <{span1}>({type1}) and <{span2}>({type2}) in this following clinical notes?",
+                            "input":f"Clinical Note: '{output_sent}'\n Options:\n{options}\nAnswer:",
+                            "output":answer,
+                            'relation_source':rel if rel else 'None'
+                        })
+                        ids.append(tid)
+
+    with open(out_dir,"w") as f:
+        json.dump(output,f,indent=4)
+    print(len(output))
+    return
 def find_entity_idx(s,e,entity_map):
     for k,v in entity_map.items():
         if k[0]==s and k[1]==e:
@@ -483,3 +768,308 @@ def plmarkerPred2json(source_file,pred_ent_file,pred_re_file,out_file):
                 offset[dic['id']]+=len(tokens)
     with open(out_file,'w') as f:
         json.dump(output,f,indent=4)
+
+def spert2GLM_evemts(infile,source_dir,outfile,split):
+    sents=json.loads(open(infile).read())
+
+    output=[]
+
+    for idx,sent in enumerate(sents):
+        if "orig_id" not in sent:
+            sent['orig_id']=sent['id'].split('-')[0]
+
+        start,end=sent["token_offsets"][0]["start"],sent["token_offsets"][-1]["end"]
+        text=f'{source_dir}/{sent["orig_id"]}.txt'
+        text=open(text).read()[start:end]
+        id=f'{split}/{sent["orig_id"]}-{start}to{end}'
+        # get entities
+        entities=[]
+        for idx,ent in enumerate(sent['entities']):
+            assert sent['tokens'][ent['start']] in text and sent['tokens'][ent['end']-1] in text, [id,ent]
+            if '-' in ent['type']:
+                ent["type"],ent['subtype']=ent["type"].split('-')
+            # token_offset - sent_offset
+            ent_s=sent['token_offsets'][ent['start']]["start"]-sent['token_offsets'][0]["start"]
+            ent_e=sent['token_offsets'][ent['end']-1]["end"]-sent['token_offsets'][0]["start"]
+
+            entities.append([ent["type"],ent['subtype'],ent['start'],ent['end'],text[ent_s:ent_e],idx])
+        
+        entities=sorted(entities,key=lambda x: (x[2],x[3]))
+
+        include=True
+        # get problem
+        output_text=[]
+        for ent in entities:
+            if ent[0]=='Drug':
+                output_text.append(f"<Drug> {ent[-2]}")
+            if ent[0]=='Problem':
+                assert ent[1] in ['present','absent','hypothetical','not_patient','possible','conditional']
+                values={
+                    'Problem':ent[-2],
+                    'Assertion':ent[1],
+                    'Anatomy':'None',
+                    'Duration':'None',
+                    'Frequency':'None',
+                    'Characteristics':'None',
+                    'Change':'None',
+                    'Severity':'None',
+                }
+
+                for rel in sent['relations']:
+                    tar_idx=None
+                    if rel['head']==ent[-1]:
+                        tar_idx=rel['tail']
+                    elif rel['tail']==ent[-1]:
+                        tar_idx=rel['head']
+                    
+                    if tar_idx is not None:
+                        rtype=rel['type'].split('-')[-1]
+                        if rtype not in values:
+                            assert rtype in relation_type_map
+                            continue
+                        attr=[ent2 for ent2 in entities if ent2[-1]==tar_idx][0]
+                        if attr[0] == 'Change':
+                            assert attr[1] in ['improving','worsening','no_change','resolved']
+                            values[attr[0]]=attr[1]
+                        elif attr[0] == 'Severity':
+                            assert attr[1] in ['mild','moderate','severe']
+                            values[attr[0]]=attr[1]
+                        else:
+                            if values[attr[0]]=="None":
+                                values[attr[0]]=attr[-2]
+                            else:
+                                assert attr[0] in ["Anatomy",'Characteristics','Duration','Frequency'],attr
+                                values[attr[0]]+=" <s> "+attr[-2]
+
+                rs=""
+                for key,item in values.items():
+                    rs+=f' <{key}> {item.strip()}'
+                output_text.append(rs)
+
+
+        output.append({
+            "orig_id":sent["orig_id"],
+            "sent_id": sent["start_send_id"],
+            "offset": sent["offset"],
+            'token_start':start,
+            "token_end":end,
+            'id':id,
+            'instruction':'You are a medical expert. Extract all drug and medical problem events from the following clinical note. All events constraints span-only arguments and/or valued arguments. Span-only arguments must use the span original from the clinical note. A medical problem event contains required arguments as a trigger span and an assertion value (present, absent, possible, conditional, hypothetical, not_patient), as well as optional arguments as at most one anatomy span, at most one duration span, at most one frequency span, characteristics spans, change value (no_change, improving, worsening, resolved), severity value (mild, moderate, severe). The drug event contains a required argument as a trigger span.',
+            'input':f"Clinical note: '{text}'",
+            'output':' [SEP] '.join(output_text) if output_text else "None"
+        })
+
+    with open(outfile,'w') as f:
+        json.dump(output,f,indent=4)
+    return
+
+def spert2T5_generativeRE(source_file,outfile):
+    final_output=[]
+    source=json.loads(open(source_file).read())
+
+    for dic in source:      
+        tokens=copy.deepcopy(dic['tokens'])
+
+        relations={}
+        for k,r in relation_names.items():
+            relations[r]=[]
+        relation_source=[]
+        for rel in dic['relations']:
+            if rel['type'] in relation_names:
+                h=dic['entities'][rel['head']]
+                t=dic['entities'][rel['tail']]
+                head=' '.join(tokens[h['start']:h['end']])
+                tail=' '.join(tokens[t['start']:t['end']])
+                relations[relation_names[rel['type']]].append(f'<head> {head} <tail> {tail}')
+                relation_source.append([dic['token_offsets'][h['start']]["start"],dic['token_offsets'][h['end']-1]["end"],
+                                        dic['token_offsets'][t['start']]["start"],dic['token_offsets'][t['end']-1]["end"],
+                                        rel['type'],
+                                        f'<head> {head} <tail> {tail}'])
+        
+        drug_count,problem_count=0,0
+        for ent in dic['entities']:
+            if ent['type']=='Drug' or 'Problem' in ent['type']:
+                tokens[ent['start']]='<'+tokens[ent['start']]
+                tokens[ent['end']-1]+=f">({ent['type']})"
+                if ent['type']=='Drug':
+                    drug_count+=1
+                else:
+                    problem_count+=1
+        if problem_count>0 and drug_count+problem_count>=2:
+            output=[]
+            for k,v in relations.items():
+                if v:
+                    output.append(f'{k}: '+' [SEP] '.join(v))
+                else:
+                    output.append(f'{k}: None')
+            output='\n'.join(output)
+
+            out_id=f"{dic['orig_id']}-offset{dic['offset']}-sent_id{dic['sent_id']}" if 'orig_id' in dic else dic['id']
+            final_output.append({
+                "id":out_id,
+                "instruction":f"Extract all relations related to drug and medical problems from this clinical note. The relation must be explicitly stated.",
+                "input":f"Clinical Note: "+' '.join(tokens),
+                "output":output,
+                'num_sent':dic['num_sent']
+                #'relation_source':'[SEP]'.join(relation_source) if relation_source else '',
+                })
+
+    with open(outfile,"w") as f:
+        json.dump(final_output,f,indent=4)
+
+def write_tb(type,text,event,document_map,output_lines,token_start,id,text_tb=''):
+    if type in Sub_types:
+        span=text_tb
+        subtype=event.replace(f'<{type}>','').strip()
+        if subtype not in Sub_types[type]:
+            return document_map,output_lines
+    else:
+        span=event.replace(f'<{type}>','').strip()
+
+    if span in text and '\n' not in span and span!="None" and span!="":
+        s,e=text.index(span),text.index(span)+len(span)
+        s,e=s+token_start,e+token_start
+        if type in ['Drug','Problem'] and (s,e,span) in document_map[id]['visited_idx'][type]:
+            #print((s,e,span))
+            offset=max([t[1] for t in document_map[id]['visited_idx'][type] if t[2]==span])
+            # print([t[1] for t in document_map[id]['visited_idx'][type] if t[2]==span])
+            #print((offset-token_start,span,text))
+            if span not in text[offset-token_start:]:
+                return document_map,output_lines
+            s=text[offset-token_start:].index(span)
+            s,e=s+offset,s+offset+len(span)
+        
+        
+        document_map[id]['visited_idx'][type].append((s,e,span))
+        output_lines.append(f"T{document_map[id]['Tidx']}\t{type} {s} {e}\t{span}")
+        if type=='Drug':
+            output_lines.append(f"E{document_map[id]['Tidx']}\t{type}:T{document_map[id]['Tidx']}")
+        elif type in Sub_types:
+            output_lines.append(f"A{document_map[id]['Tidx']}\t{type}Val T{document_map[id]['Tidx']} {subtype}")
+            
+        document_map[id]['Tidx']+=1
+    return document_map,output_lines
+
+
+def glmEvents2BRAT(pred_file,ann_path,out_dir,ref_dir,ref_file=None):
+    if ".jsonl" in pred_file:
+        pred={}
+        lines = open(pred_file).read().split('\n')
+        ref_dic=json.loads(open(ref_file).read())
+        for l,rd in zip(lines,ref_dic):
+            if l:
+                pred[rd["id"]]=json.loads(l)['predict']
+    else:   
+        pred=json.loads(open(pred_file).read()) 
+    
+    if os.path.isdir(ref_dir):
+        shutil.rmtree(ref_dir)
+    os.makedirs(ref_dir)
+
+    if os.path.isdir(out_dir):
+        shutil.rmtree(out_dir)
+    os.makedirs(out_dir)
+
+
+    document_map={}
+    for key,p_output in pred.items():
+        key=key.split('/')[-1]
+        id,tok=key.split('-')
+        token_start,token_end=tok.split('to')
+        token_start,token_end=int(token_start),int(token_end)
+        text=f'{ann_path}/{id}.txt'
+        text=open(text).read()[token_start:token_end]
+        
+        if p_output.strip()=="None":
+            continue
+        
+        
+        for v in all_attributes+['Problem','Drug']:
+            if f"{v}>" in p_output and f"<{v}>" not in p_output:
+                p_output=p_output.replace(f"{v}>",f"<{v}>")
+
+        index=len(p_output)
+        for v in ['Problem','Drug']:
+            if f"<{v}>" in p_output:
+                index=min(index,p_output.index(f"<{v}>"))
+        p_output=p_output[index:]
+
+        events=[l.strip() for l in p_output.split('[SEP]') if l.strip()]
+
+        if id not in document_map:
+            document_map={} ### assuming that all documents are very close, here we clear the memory everytime,
+            document_map[id]={
+                'Tidx':1,
+                'Aidx':1,
+                'Eidx':1,
+                'Ridx':1,
+                'outlines':[],
+                'visited_idx':{},
+            }
+            for t in ["Drug",'Problem'] + all_attributes:
+                document_map[id]['visited_idx'][t]=[]
+
+
+        output_lines=document_map[id]['outlines']
+
+        tbs_map=[] #
+        out_entities=[]
+        for event in events:
+            if '<Drug>' in event:
+                document_map,output_lines=write_tb("Drug",text,event,document_map,output_lines,token_start,id)
+            elif event.count('<Problem>')==1:
+                if all([event.count(f"<{a}>")==1 for a in all_attributes]):
+                    for a in all_attributes:
+                        event=event.replace(f"<{a}>",f"[SEP]<{a}>")
+                    attributes=[l.strip() for l in event.split('[SEP]') if l.strip()]
+                    for it,attr in enumerate(attributes):
+                        type=attr.replace('<','').replace('>','').split()[0]
+                        if type == 'Problem':
+                            event=f"E{document_map[id]['Tidx']}\t"
+                            text_tb=attributes[0].replace('<Problem>',"").strip()
+                            if text_tb not in text:
+                                continue
+                        if type in ['Problem'] + all_attributes:
+                            tid=document_map[id]['Tidx']+0
+                            # if '<s>' in attr:
+                            #     print(attr)
+                            for count,att in enumerate(attr.split('<s>')):
+                                document_map,output_lines=write_tb(type,text,att,document_map,output_lines,token_start,id,text_tb=text_tb)
+                                if tid!=document_map[id]['Tidx']:
+                                    if event[-1]!='\t':
+                                        event+=" "
+                                    count+=1
+                                    if count==1:
+                                        count=""
+                                    event+=f"{type}{count}:T{document_map[id]['Tidx']-1}"
+                                    # if count==2:
+                                    #     print(event)
+                        assert '[SEP]' not in event,[attr,event]
+                    if ':' in event:                
+                        output_lines.append(event)
+        with open(f"{out_dir}/{id}.ann",'w') as f:
+            f.write('\n'.join(output_lines))
+        shutil.copy(f'{ann_path}/{id}.txt',f"{out_dir}/{id}.txt")
+        shutil.copy(f'{ann_path}/{id}.txt',f"{ref_dir}/{id}.txt")
+        shutil.copy(f'{ann_path}/{id}.ann',f"{ref_dir}/{id}.ann")
+    return
+
+
+def align_spert_json(source_file,reference_file,outfile):
+    pred=json.loads(open(source_file).read())
+    source=json.loads(open(reference_file).read())
+
+    for s in tqdm(source):
+        s['entities']=[]
+        s['relations']=[]
+        for p in pred:
+            if p['id']==s['id']:
+                s['entities']=copy.deepcopy(p['id'])
+                break
+
+    with open(outfile,'w') as f:
+        json.dump(source,f,indent=4)
+    return
+
+
+
