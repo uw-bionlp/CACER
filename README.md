@@ -1,5 +1,5 @@
 # CACER
-Dataset and baseline experiments for the manuscript [CACER: Clinical concept Annotations for Cancer Events and Relations](https://academic.oup.com/jamia/advance-article/doi/10.1093/jamia/ocae231/7748302?searchresult=1) dataset.
+Dataset and baseline experiments for the manuscript, [CACER: Clinical concept Annotations for Cancer Events and Relations](https://academic.oup.com/jamia/advance-article/doi/10.1093/jamia/ocae231/7748302?searchresult=1).
 
 # Data preprocessing
 ## Dataset cleaning
