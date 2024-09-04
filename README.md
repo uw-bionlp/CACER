@@ -47,6 +47,8 @@ The code deploys the [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) p
 
 # Evaluation
 
+# Contact
+For questions about this dataset, please contact Velvin Fu at velvinfu@uw.edu.
 
 # Cite
 ```bibtex
